@@ -1,36 +1,250 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Chapter 4-1. 인프라 관점의 성능 최적화
 
-## Getting Started
+## 1. 배포 파이프라인 아키텍처
 
-First, run the development server:
-
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+```mermaid
+graph LR
+    A[GitHub Repository] -->|Checkout| B[GitHub Actions]
+    B -->|빌드| C[Next.js 빌드]
+    C -->|배포| D[S3 Bucket]
+    D -->|서비스| E[CloudFront]
+    E -->|전달| F[최종 사용자]
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## 2. 배포 환경 정보
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- S3: http://hanghae-fe-mz.s3-website.us-east-2.amazonaws.com
+- CloudFront: https://d2frqibwssqytw.cloudfront.net
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## 3. 기술 스택 상세 설명
 
-## Learn More
+### 3-1. CI/CD
 
-To learn more about Next.js, take a look at the following resources:
+#### 3-1-1. CI(Continuous Integration)
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+> 브랜치에 병합 시에 자동으로 빌드하고 테스트하는 프로세스
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- 버그를 조기에 발견할 수 있음
+- 팀원 간 충돌을 빠르게 해결할 수 있음
+- 품질 높은 코드 유지에 기여할 수 있음
 
-## Deploy on Vercel
+#### 3-1-2. CD(Continuous Delivery/Deployment)
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+> CI 이후 배포 가능한 상태까지 준비하거나 실제 배포까지 자동화하는 프로세스
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- **Continuous Delivery**: 배포 준비까지만 자동화(운영 환경 배포는 수동 트리거)
+- **Continuous Deployment**: 운영 환경까지 자동 배포
+
+### 3-2. GitHub Actions란?
+
+> GitHub 에서 제공하는 자동화된 워크플로우 실행 플랫폼
+
+| 요소       | 설명                                                    |
+| ---------- | ------------------------------------------------------- |
+| `workflow` | 자동화 작업의 단위 (ex. 배포, 테스트, 린트 등)          |
+| `job`      | 워크플로우 내에서 병렬 또는 순차로 실행하는 작업        |
+| `step`     | Job 안에서 실제 실행하는 명령어 또는 액션 단위          |
+| `action`   | 재사용 가능한 자동화 스크립트 (GitHub 또는 사용자 정의) |
+| `runner`   | 워크플로우를 실행하는 OS 환경 (Ubuntu, Windows 등)      |
+
+#### 3-2-1. GitHub Actions vs 기타 CI/CD 도구
+
+| 항목        | GitHub Actions                      | Jenkins               | GitLab CI/CD | CircleCI         |
+| ----------- | ----------------------------------- | --------------------- | ------------ | ---------------- |
+| 설정 난이도 | 쉬움 (YAML 기반)                    | 높음 (서버 설치 필요) | 쉬움         | 중간             |
+| 통합성      | GitHub 전용                         | 범용                  | GitLab 전용  | 다양한 VCS 지원  |
+| UI/UX       | 직관적                              | 복잡함                | 깔끔함       | 직관적           |
+| 커뮤니티    | 활발함                              | 크고 오래됨           | 활발함       | 활발함           |
+| 비용        | 퍼블릭은 무료, 프라이빗은 제한 있음 | 자가호스팅 무료       | 퍼블릭 무료  | 무료 요금제 존재 |
+
+### 3-3. 스토리지란?
+
+> 데이터를 저장하는 공간
+
+| 유형          | 설명                                                                     | 예시                            |
+| ------------- | ------------------------------------------------------------------------ | ------------------------------- |
+| 블록 스토리지 | 디스크 단위로 데이터를 블록으로 저장(빠른 읽기/쓰기 속도 필요할 때 사용) | Amazon EBS, HDD, SSD            |
+| 객체 스토리지 | 파일 단위로 데이터를 객체로 저장(메타데이터와 함께 저장)                 | Amazon S3, Google Cloud Storage |
+| 파일 스토리지 | 계층적 디렉터리 구조로 파일 저장(공유 파일 시스템에 적합)                | Amazon EFS, NFS                 |
+
+### 3-4. Amazon S3란?
+
+> 객체 스토리지 서비스(웹에서 파일을 저장하고 가져오는 데 최적화된 스토리지)
+
+#### 3-4-1. 핵심 개념
+
+- **Bucket**: S3에서 파일을 저장하는 가장 상위 컨테이너 (폴더처럼 쓰이지만 이름은 전역 유일)
+- **Object**: S3에 저장되는 실제 데이터 (파일)
+- **Key**: 버킷 내 객체의 고유한 경로
+- **Region**: 버킷이 저장되는 지리적 위치
+- **Storage Class**: 객체의 저장 방식에 따른 비용/속도 차등 설정
+
+#### 3-4-2. 주요 특징
+
+| 기능           | 설명                                                  |
+| -------------- | ----------------------------------------------------- |
+| 무제한 저장    | 객체 수 제한 없음, 크기 최대 5TB 까지 가능            |
+| 정적 웹 호스팅 | HTML, CSS, JS 파일로 구성된 정적 사이트 배포 가능     |
+| 접근 제어      | 버킷 정책, ACL, IAM 으로 보안 설정 가능               |
+| 버전 관리      | 같은 키로 업로드한 파일의 변경 이력 추적 가능         |
+| 수명 주기 관리 | 일정 기간 후 자동 삭제 또는 스토리지 클래스 변경 가능 |
+
+#### 3-4-3. 사용 사례
+
+| 사용 사례          | 설명                                                       |
+| ------------------ | ---------------------------------------------------------- |
+| 정적 웹사이트 배포 | 빌드된 정적 파일(HTML, JS 등)을 직접 S3 에 업로드해 호스팅 |
+| 이미지/동영상 저장 | CDN 과 함께 써서 대용량 콘텐츠 전송에 활용                 |
+| 백업 및 로그 저장  | 백업/로그 파일을 장기 저장용으로 보관                      |
+| 데이터 파이프라인  | 빅데이터 분석, ML 학습용 원천 데이터 저장소로 활용         |
+
+#### 3-4-4. 적용 예시
+
+1. Next.js를 `npm run build` 로 빌드 → `.next` 혹은 `out` 폴더에 정적 자산 생성
+2. `aws s3 sync` 명령어로 해당 파일을 S3 버킷에 업로드
+
+   ```bash
+   aws s3 sync ./out s3://your-bucket-name --delete
+   ```
+
+3. CloudFront 와 연동하여 정적 콘텐츠를 전 세계에 빠르게 전송
+4. CloudFront 캐시 무효화 명령어로 최신 파일 반영
+
+   ```bash
+   aws cloudfront create-invalidation --distribution-id ... --paths "/*"
+   ```
+
+### 3-5. CDN이란?
+
+> 전 세계에 분산된 서버 네트워크를 통해 사용자에게 더 빠르고 안정적으로 콘텐츠를 제공하는 시스템
+
+#### 3-5-1. 사용 이유
+
+- 사용자의 지리적 위치와 상관없이 짧은 지연 시간(Latency) 제공
+- 서버 과부하 방지 → 트래픽 분산 효과
+- 이미지, JS, CSS 등 정적 자산을 빠르게 서빙
+- 캐싱 기능으로 속도 향상 및 비용 절감
+
+#### 3-5-2. 작동 방식
+
+```mermaid
+graph LR
+    A[사용자] -->|요청| B[가장 가까운 엣지 서버 - CDN PoP]
+    B -->|캐시 미스 시| C[원본 서버 - S3 등]
+    C -->|콘텐츠 전송| B
+    B -->|응답| A
+```
+
+- 요청한 파일이 캐시에 있으면 즉시 응답 (Hit)
+- 없으면 원본에서 가져와 캐시에 저장 후 응답 (Miss)
+
+### 3-6. Amazon CloudFront란?
+
+> AWS 에서 제공하는 고성능 CDN 서비스
+
+#### 3-6-1. 주요 개념
+
+| 용어                          | 설명                                               |
+| ----------------------------- | -------------------------------------------------- |
+| 엣지 로케이션 (Edge Location) | 전 세계에 분산된 CDN 서버                          |
+| 배포(Distribution)            | CloudFront의 핵심 단위. 콘텐츠를 배포할 설정 정보  |
+| 오리진(Origin)                | 실제 콘텐츠가 저장된 위치 (예: S3, EC2, 외부 서버) |
+| 캐시 정책                     | 어떤 콘텐츠를 어떻게 캐시할지 결정                 |
+| TTL (Time to Live)            | 캐시된 콘텐츠가 유지되는 시간                      |
+
+#### 3-6-2. 장점
+
+- 전 세계 엣지 서버를 통한 빠른 응답
+- HTTPS, 인증서 등 보안 설정 지원
+- 캐시 무효화 기능으로 실시간 업데이트 가능
+- 가격 대비 성능 우수 (사용량 기반 과금)
+
+#### 3-6-3. CloudFront + S3 정적 웹사이트 배포 구조
+
+```mermaid
+graph LR
+    A[GitHub Actions] -->|빌드된 정적 파일\nNext.js out 폴더| B[S3 버킷]
+    B -->|오리진으로 사용| C[CloudFront 배포]
+    C -->|가장 가까운 CDN 엣지 서버| D[사용자]
+    D -->|요청| C
+```
+
+#### 3-6-4. 캐시 무효화 예시
+
+```bash
+aws cloudfront create-invalidation \
+  --distribution-id YOUR_DISTRIBUTION_ID \
+  --paths "/*"
+```
+
+- 캐시된 모든 파일을 무효화하고 S3 의 최신 파일 재반영
+
+#### 3-6-5. 적용 예시
+
+- 정적 파일 (HTML, JS, CSS 등) 캐싱을 통해 TTFB(Time to First Byte) 최소화
+- 이미지, 글꼴, 썸네일 등 용량이 큰 자산 빠르게 전송
+- 버전 관리 및 캐시 무효화 전략 설정으로 배포 속도와 UX 모두 개선
+- 웹사이트 트래픽이 많을 경우에도 빠른 응답과 확장성 제공
+
+## 4. CDN 도입 성능 개선 사항
+
+> S3 직접 접속과 CloudFront CDN 을 통한 접속의 성능 차이 분석
+
+### 4-1. 성능 비교 분석
+
+| S3 | CloudFront |
+| --- | --- |
+| <img width="1440" alt="s3" src="https://github.com/user-attachments/assets/8add7bb7-6426-4c58-add1-5e1a4ff13d09" /> | <img width="1440" alt="cloudfront" src="https://github.com/user-attachments/assets/97de80ef-a7b7-4f0f-a68a-55719fc95307" /> |
+
+#### 4-1-1. 네트워크 응답 시간 비교
+
+| 지표                      | S3 직접 접속 | CloudFront CDN | 개선율   |
+| ------------------------- | ------------ | -------------- | -------- |
+| TTFB (Time to First Byte) | 206ms        | 26ms           | 87% 감소 |
+| 전체 로딩 시간            | 6,940ms      | 6,320ms        | 9% 감소  |
+| 리소스 다운로드 시간      | 856ms        | 75ms           | 91% 감소 |
+
+#### 4-1-2. 리소스별 로딩 시간 비교
+
+| 리소스 유형 | S3 직접 접속 | CloudFront CDN | 개선율   |
+| ----------- | ------------ | -------------- | -------- |
+| HTML        | 206ms        | 26ms           | 87% 감소 |
+| JavaScript  | 856ms        | 75ms           | 91% 감소 |
+| CSS         | 420ms        | 19ms           | 95% 감소 |
+| 이미지      | 389ms        | 18ms           | 95% 감소 |
+
+### 4-2. 주요 개선 사항
+
+#### 4-2-1. TTFB(Time to First Byte) 개선
+
+- S3 직접 접속: 206ms
+- CloudFront CDN: 26ms
+- 87% 감소
+
+#### 4-2-2. 전체 페이지 로딩 시간 단축
+
+- S3 직접 접속: 6,940ms
+- CloudFront CDN: 6,320ms
+- 9% 감소
+
+#### 4-2-3. 리소스 다운로드 최적화
+
+- 모든 리소스 유형에서 91-95% 성능 개선
+- 특히 HTML 문서의 로딩 시간이 가장 크게 개선
+
+### 4-3. 개선 효과
+
+#### 4-3-1. 사용자 경험 향상
+
+- 페이지 로딩 시간 단축으로 사용자 만족도 증가
+- 반응성 향상으로 웹사이트 사용성 개선
+
+#### 4-3-2. 서버 부하 감소
+
+- CDN을 통한 트래픽 분산으로 S3 서버 부하 감소
+- 캐싱을 통한 효율적인 리소스 제공
+
+#### 4-3-3. 글로벌 접근성 개선
+
+- 전 세계 엣지 로케이션을 통한 빠른 콘텐츠 전송
+- 지역별 접속 속도 차이 최소화
